@@ -1,7 +1,5 @@
 package com.example.android.camera2video;
 
-import android.util.Log;
-
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.Queue;
@@ -17,36 +15,40 @@ import java.util.Queue;
  *            UBIQUITOUS COMPUTING LABORATORY !>!>!>
  *
  * @author William L. Li
- * @version 1.2
+ * @version 1.3
  * @since 8/18/2016
  *
  */
 
 public class AnemiaDetection {
 
-    private static final double ERROR_TOLERANCE = 1.75;
-    private static final double LOW_PASS_SMOOTHING = 5.65; // 9.65?
+    private static final double ERROR_TOLERANCE = 2;
+    private static final double LOW_PASS_SMOOTHING = 5.65;
     private static final double HIGH_PASS_SMOOTHING = 2;
     private static final double MINIMUM_DIFFERENCE = 0.15;
 
     private static final int DETECTOR_BUFFER_SIZE = 5;
     private static final int DATA_SIZE = 10;
-    private static final int GARBAGE_FRAMES = 25;
+    private static final int GARBAGE_FRAMES = 50;
     private static final int MAX_ERROR_ALLOTMENT = 4;
     private static final int MAPPING = 3;
     private static final int PEAK = 1;
     private static final int TROUGH = 2;
     private static final int AVERAGE = 3;
-
-    private static final String TAG = "AnemiaDetection";
+    private static final int MAX_LIGHT_COVER = 5;
+    private static final int MAX_LIGHT_PARTIAL_COVER = 40;
 
     private boolean mAlreadyExecuted;
+    private boolean mPrevPeakDetected;
+    private boolean mPrevTroughDetected;
     private double mLpfOutput;
     private double mHpfOutput;
     private double mPrevLpfInput;
-    private double mPeakHolder;
-    private double mTroughHolder;
-    private double mCalcDifference;
+    private double mPeakHold;
+    private double mTroughHold;
+    private double mCalcDiff;
+    private double mPeak;
+    private double mTrough;
     private int mFrameCount;
     private int mTroughCount;
     private int mPeakCount;
@@ -65,13 +67,15 @@ public class AnemiaDetection {
         this.mAlreadyExecuted = false;
         this.mTroughCount     = 0;
         this.mPeakCount       = 0;
-        this.mPeakHolder      = 0;
-        this.mTroughHolder    = 0;
-        this.mCalcDifference  = 0;
+        this.mPeakHold        = 0;
+        this.mTroughHold      = 0;
+        this.mCalcDiff        = 0;
         this.mCountHold       = 0;
         this.mPeakFrame       = 0;
         this.mTroughFrame     = 0;
         this.mSignalWidth     = 0;
+        this.mPeak            = 0;
+        this.mTrough          = 0;
         this.mFrameCount      = mFrameCount;
         this.mConfidence      = new int[MAX_ERROR_ALLOTMENT];
         this.mElementHolder   = new LinkedList();
@@ -103,7 +107,7 @@ public class AnemiaDetection {
      *          double[1] contains the frame count
      *          double[2] contains the r value
      *
-     * An array with all indexes that 0's signifies a point
+     * An array with all indexes set to 0 signifies a point
      * that is NOT a peak NOR trough.
      */
     public double[] detectPeakTrough(double rAvg) {
@@ -119,7 +123,8 @@ public class AnemiaDetection {
                 mHpfOutput = 0;
                 mPrevLpfInput = mLpfOutput;
             } else {
-                mHpfOutput = highPassFilter(HIGH_PASS_SMOOTHING, mLpfOutput, mHpfOutput, mPrevLpfInput);
+                mHpfOutput = highPassFilter(HIGH_PASS_SMOOTHING, mLpfOutput,
+                                            mHpfOutput, mPrevLpfInput);
                 mPrevLpfInput = mLpfOutput;
                 if (mFrameCount <= GARBAGE_FRAMES + DETECTOR_BUFFER_SIZE + 2) {
                     mFilteredData.add(mHpfOutput);
@@ -164,28 +169,34 @@ public class AnemiaDetection {
      * 3 - Finger has shifted on camera!
      * 4 - Finger not on camera!
      *
+     * 0 - No result
+     *
      * @param rVal Average red value of a single image (0 - 255 RGB format)
      * @param gVal Average green value of a single image (0 - 255 RGB format)
      * @param bVal Average blue value of a single image (0 - 255 RGB format)
      * @param confidence Accuracy level of system (1 = 10% ... 9 = 90%)
      */
 
-    public void checkDataQuality(double rVal, double gVal, double bVal, int confidence) {
+    public int checkDataQuality(double rVal, double gVal, double bVal, int confidence) {
+        int output = 0;
         if (rVal < 0 || gVal < 0 || bVal < 0 || confidence > DATA_SIZE - 1 || confidence < 0) {
             throw new IllegalArgumentException();
         }
-        if (mPeakCount <= AVERAGE && mTroughCount <= AVERAGE) {
-            double[] result = detectPeakTrough(rVal); // this causes an error.. what to do..??
+        if (mPeakCount < AVERAGE && mTroughCount < AVERAGE) {
+            double[] result = detectPeakTrough(rVal);
             if (result[0] == PEAK) {
-                mPeakHolder += result[2];
+                mPeakHold += result[2];
+                mPeakFrame += result[1];
                 mPeakCount++;
-            } else if (result[0] == TROUGH) {
-                mTroughHolder += result[2];
+            } else if(result[0] == TROUGH) {
+                mTroughHold += result[2];
+                mTroughFrame += result[1];
                 mTroughCount++;
             }
         } else if (!mAlreadyExecuted) {
-            mCalcDifference = ((mPeakHolder / mPeakCount) - (mTroughHolder / mTroughCount)) * ERROR_TOLERANCE;
-            mSignalWidth = (int) (((mPeakFrame / mPeakCount) - (mTroughFrame / mTroughCount)) * ERROR_TOLERANCE);
+            mCalcDiff = ((mPeakHold / mPeakCount) - (mTroughHold / mTroughCount)) + ERROR_TOLERANCE;
+            mSignalWidth = (int) Math.abs((((mPeakFrame / mPeakCount)
+                                 - (mTroughFrame / mTroughCount))) + ERROR_TOLERANCE);
             mCountHold = mFrameCount;
             mAlreadyExecuted = true;
         } else {
@@ -193,42 +204,40 @@ public class AnemiaDetection {
                 mElementHolder.add(rVal);
             } else {
                 double difference = Math.abs(rVal - mElementHolder.remove());
-                if (difference < mCalcDifference && difference > MINIMUM_DIFFERENCE && gVal < 5 && bVal < 5) {
+                if (difference < mCalcDiff && difference > MINIMUM_DIFFERENCE &&
+                        gVal < MAX_LIGHT_COVER && bVal < MAX_LIGHT_COVER) {
                     mConfidence[0]++;
-                } else if (difference < mCalcDifference && difference > MINIMUM_DIFFERENCE && (gVal < 35 || bVal < 35)) {
+                } else if (difference < mCalcDiff && difference > MINIMUM_DIFFERENCE &&
+                        (gVal < MAX_LIGHT_PARTIAL_COVER || bVal < MAX_LIGHT_PARTIAL_COVER)) {
                     mConfidence[1]++;
-                } else if (difference > mCalcDifference) {
+                } else if (difference > mCalcDiff) {
                     mConfidence[2]++;
                 } else { // difference < 0.15 && gVal > 0.05 && bVal > 0.05
                     mConfidence[3]++;
                 }
                 mElementHolder.add(rVal);
                 if (mFrameCount % DATA_SIZE == 0) {
-                    confidenceCheck(confidence);
+                   output = confidenceCheck(confidence);
                     mConfidence = new int[MAX_ERROR_ALLOTMENT];
                 }
             }
         }
+        return output;
     }
 
-    // Error detection method
+    // Error reporting
     private int confidenceCheck(int confidence) {
+        int result = 0;
         if (mConfidence[0] >= confidence) {
-            Log.d(TAG, "Finger is accurately on camera!");
-            return 1;
+            result = 1;
         } else if (mConfidence[1] >= confidence) {
-            Log.d(TAG, "Finger not covering camera correctly!");
-            return 2;
+            result = 2;
         } else if (mConfidence[2] >= confidence) {
-            Log.d(TAG, "Finger has shifted on camera!");
-            return 3;
+            result = 3;
         } else if (mConfidence[3] >= confidence) {
-            Log.d(TAG, "Finger not on camera!");
-            return 4;
-        } else {
-            Log.d(TAG, "Calculating ...");
-            return 0;
+            result = 4;
         }
+        return result;
     }
 
     /**
@@ -277,11 +286,38 @@ public class AnemiaDetection {
      * @param prevOutput previous value of the clean signal
      * @return filtered signal
      */
-    private double highPassFilter(double smoothing, double input, double prevOutput, double prevInput) {
+    private double highPassFilter(double smoothing, double input,
+                                  double prevOutput, double prevInput) {
         if (smoothing <= 1) {
             throw new IllegalArgumentException();
         }
         double b = 1 - (1 / smoothing);
         return b * (prevOutput + input - prevInput);
     }
+
+    /**
+     * Outputs a difference (magnitude) of the AC component of
+     * the input signal. The difference is calculated by subtracting
+     * the peak from the trough.
+     *
+     * @param input the array that contains
+     * @return the difference between the peak and trough
+     */
+    public double findAcRange(double[] input) {
+        double difference = 0.0;
+        if (input[0] == PEAK && !mPrevPeakDetected) {
+            mPeak = input[2];
+            mPrevPeakDetected = true;
+        } else if (input[0] == TROUGH && !mPrevTroughDetected) {
+            mTrough = input[2];
+            mPrevTroughDetected = true;
+        }
+        if (mPrevTroughDetected && mPrevPeakDetected) {
+            difference = Math.abs(mPeak - mTrough);
+            mPrevPeakDetected = false;
+            mPrevTroughDetected = false;
+        }
+        return difference;
+    }
 }
+
