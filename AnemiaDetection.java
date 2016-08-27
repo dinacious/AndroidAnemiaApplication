@@ -25,7 +25,7 @@ public class AnemiaDetection {
     private static final double ERROR_TOLERANCE = 2;
     private static final double LOW_PASS_SMOOTHING = 5.65;
     private static final double HIGH_PASS_SMOOTHING = 2;
-    private static final double MINIMUM_DIFFERENCE = 0.15;
+    private static final double MINIMUM_DIFFERENCE = 0.05;
 
     private static final int DETECTOR_BUFFER_SIZE = 5;
     private static final int DATA_SIZE = 10;
@@ -36,7 +36,7 @@ public class AnemiaDetection {
     private static final int TROUGH = 2;
     private static final int AVERAGE = 3;
     private static final int MAX_LIGHT_COVER = 5;
-    private static final int MAX_LIGHT_PARTIAL_COVER = 40;
+    private static final int MAX_LIGHT_PARTIAL_COVER = 50;
 
     private boolean mAlreadyExecuted;
     private boolean mPrevPeakDetected;
@@ -182,7 +182,7 @@ public class AnemiaDetection {
         if (rVal < 0 || gVal < 0 || bVal < 0 || confidence > DATA_SIZE - 1 || confidence < 0) {
             throw new IllegalArgumentException();
         }
-        if (mPeakCount < AVERAGE && mTroughCount < AVERAGE) {
+        if (mPeakCount < AVERAGE || mTroughCount < AVERAGE) {
             double[] result = detectPeakTrough(rVal);
             if (result[0] == PEAK) {
                 mPeakHold += result[2];
@@ -212,7 +212,7 @@ public class AnemiaDetection {
                     mConfidence[1]++;
                 } else if (difference > mCalcDiff) {
                     mConfidence[2]++;
-                } else { // difference < 0.15 && gVal > 0.05 && bVal > 0.05
+                } else { 
                     mConfidence[3]++;
                 }
                 mElementHolder.add(rVal);
