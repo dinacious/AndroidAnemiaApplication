@@ -15,8 +15,8 @@ import java.util.Queue;
  *            UBIQUITOUS COMPUTING LABORATORY !>!>!>
  *
  * @author William L. Li
- * @version 1.3
- * @since 8/18/2016
+ * @version 1.35
+ * @since 8/29/2016
  *
  */
 
@@ -26,10 +26,11 @@ public class AnemiaDetection {
     private static final double LOW_PASS_SMOOTHING = 5.65;
     private static final double HIGH_PASS_SMOOTHING = 2;
     private static final double MINIMUM_DIFFERENCE = 0.05;
+    private static final double CALC_DIFF_HARD = 5.5;
 
     private static final int DETECTOR_BUFFER_SIZE = 5;
     private static final int DATA_SIZE = 10;
-    private static final int GARBAGE_FRAMES = 50;
+    private static final int GARBAGE_FRAMES = 30;
     private static final int MAX_ERROR_ALLOTMENT = 4;
     private static final int MAPPING = 3;
     private static final int PEAK = 1;
@@ -212,7 +213,7 @@ public class AnemiaDetection {
                     mConfidence[1]++;
                 } else if (difference > mCalcDiff) {
                     mConfidence[2]++;
-                } else { 
+                } else { // difference < 0.15 && gVal > 0.05 && bVal > 0.05
                     mConfidence[3]++;
                 }
                 mElementHolder.add(rVal);
@@ -295,7 +296,7 @@ public class AnemiaDetection {
         return b * (prevOutput + input - prevInput);
     }
 
-    /**
+    /*
      * Outputs a difference (magnitude) of the AC component of
      * the input signal. The difference is calculated by subtracting
      * the peak from the trough.
@@ -319,5 +320,61 @@ public class AnemiaDetection {
         }
         return difference;
     }
+
+
+    /**
+     *          *** HARDCODED CONSTANTS ***
+     *
+     * Detects whether the user has moved his/her finger
+     * from the camera. Ignores the first "n" frames
+     * due to excessive noise. Will return an integer
+     * value that has:
+     *
+     * 1 - Finger is accurately on camera!
+     * 2 - Finger not covering camera correctly!
+     * 3 - Finger has shifted on camera!
+     * 4 - Finger not on camera!
+     *
+     * 0 - No result
+     *
+     * @param rVal Average red value of a single image (0 - 255 RGB format)
+     * @param gVal Average green value of a single image (0 - 255 RGB format)
+     * @param bVal Average blue value of a single image (0 - 255 RGB format)
+     * @param confidence Accuracy level of system (1 = 10% ... 9 = 90%)
+     */
+
+    public int checkDataQuality2(double rVal, double gVal, double bVal, int confidence) {
+        if (rVal < 0 || gVal < 0 || bVal < 0 || confidence > DATA_SIZE - 1 || confidence < 0) {
+            throw new IllegalArgumentException();
+        }
+        int output = 0;
+        if (mFrameCount <= GARBAGE_FRAMES) {
+            return output;
+        } else {
+            if (mFrameCount - GARBAGE_FRAMES <= GARBAGE_FRAMES / 2) {
+                mElementHolder.add(rVal);
+            } else {
+                double difference = Math.abs(rVal - mElementHolder.remove());
+                if (difference < CALC_DIFF_HARD && difference > MINIMUM_DIFFERENCE &&
+                        gVal < MAX_LIGHT_COVER && bVal < MAX_LIGHT_COVER) {
+                    mConfidence[0]++;
+                } else if (difference < CALC_DIFF_HARD && difference > MINIMUM_DIFFERENCE &&
+                        (gVal < MAX_LIGHT_PARTIAL_COVER || bVal < MAX_LIGHT_PARTIAL_COVER)) {
+                    mConfidence[1]++;
+                } else if (difference > CALC_DIFF_HARD) {
+                    mConfidence[2]++;
+                } else {
+                    mConfidence[3]++;
+                }
+                mElementHolder.add(rVal);
+                if (mFrameCount % DATA_SIZE == 0) {
+                    output = confidenceCheck(confidence);
+                    mConfidence = new int[MAX_ERROR_ALLOTMENT];
+                }
+            }
+        }
+        return output;
+    }
 }
+
 
