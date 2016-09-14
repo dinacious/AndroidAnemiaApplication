@@ -1,4 +1,4 @@
-package com.example.android.camera2video;
+package ubicomp.william.com.rgbchanneldatacollector;
 
 import java.util.ArrayList;
 import java.util.LinkedList;
@@ -15,8 +15,8 @@ import java.util.Queue;
  *            UBIQUITOUS COMPUTING LABORATORY !>!>!>
  *
  * @author William L. Li
- * @version 1.35
- * @since 8/29/2016
+ * @version 1.4
+ * @since 9/13/2016
  *
  */
 
@@ -30,7 +30,7 @@ public class AnemiaDetection {
 
     private static final int DETECTOR_BUFFER_SIZE = 5;
     private static final int DATA_SIZE = 10;
-    private static final int GARBAGE_FRAMES = 30;
+    private static final int GARBAGE_FRAMES = 0; // Change this value if you want to remove noise from data from first X frames of stream
     private static final int MAX_ERROR_ALLOTMENT = 4;
     private static final int MAPPING = 3;
     private static final int PEAK = 1;
@@ -97,8 +97,10 @@ public class AnemiaDetection {
      * raw signal. Ignores the first "n" frames due to
      * excessive noise.
      *
-     * @param rAvg The average red value (0 - 255 RGB format)
-     *             of each input video frame
+     * @param rAvg       The average red value (0 - 255 RGB format)
+     *                   of each input video frame
+     * @param startFrame The first frame that the detector will start
+     *                   running on
      *
      * @return An array that contains three data points:
      *          double[0] contains either a 0.0, 1.0 or 2.0
@@ -111,32 +113,32 @@ public class AnemiaDetection {
      * An array with all indexes set to 0 signifies a point
      * that is NOT a peak NOR trough.
      */
-    public double[] detectPeakTrough(double rAvg) {
+    public double[] detectPeakTrough(double rAvg, int startFrame) {
         double[] result = new double[3];
-        if (mFrameCount <= GARBAGE_FRAMES) {
+        if (mFrameCount <= GARBAGE_FRAMES + startFrame) {
             return result;
         }
-        if (GARBAGE_FRAMES + 1 == mFrameCount) {
+        if (mFrameCount == GARBAGE_FRAMES + startFrame + 1) {
             mLpfOutput = rAvg;
         } else {
             mLpfOutput = lowPassFilter(LOW_PASS_SMOOTHING, rAvg, mLpfOutput);
-            if (GARBAGE_FRAMES + 2 == mFrameCount) {
+            if (mFrameCount == GARBAGE_FRAMES + startFrame + 2) {
                 mHpfOutput = 0;
                 mPrevLpfInput = mLpfOutput;
             } else {
                 mHpfOutput = highPassFilter(HIGH_PASS_SMOOTHING, mLpfOutput,
                                             mHpfOutput, mPrevLpfInput);
                 mPrevLpfInput = mLpfOutput;
-                if (mFrameCount <= GARBAGE_FRAMES + DETECTOR_BUFFER_SIZE + 2) {
+                if(mFrameCount <= GARBAGE_FRAMES + DETECTOR_BUFFER_SIZE + startFrame + 2) {
                     mFilteredData.add(mHpfOutput);
                     mOriginalData.add(rAvg);
                 } else {
                     final int rMapping = mFrameCount - MAPPING;
                     final double rVal = mOriginalData.get(2);
                     if (mFilteredData.get(2) > mFilteredData.get(1) &&
-                        mFilteredData.get(2) > mFilteredData.get(3) &&
-                        mFilteredData.get(1) > mFilteredData.get(0) &&
-                        mFilteredData.get(3) > mFilteredData.get(4)) {
+                            mFilteredData.get(2) > mFilteredData.get(3) &&
+                            mFilteredData.get(1) > mFilteredData.get(0) &&
+                            mFilteredData.get(3) > mFilteredData.get(4)) {
                         result[0] = PEAK;
                         result[1]= rMapping;
                         result[2] = rVal;
@@ -158,73 +160,75 @@ public class AnemiaDetection {
         return result;
     }
 
+     /**
+      * Detects whether the user has moved his/her finger
+      * from the camera. Ignores the first "n" frames
+      * due to excessive noise. Will return an integer
+      * value that has:
+      *
+      * 1 - Finger is accurately on camera!
+      * 2 - Finger not covering camera correctly!
+      * 3 - Finger has shifted on camera!
+      * 4 - Finger not on camera!
+      *
+      * 0 - No result
+      *
+      * @param rVal Average red value of a single image (0 - 255 RGB format)
+      * @param gVal Average green value of a single image (0 - 255 RGB format)
+      * @param bVal Average blue value of a single image (0 - 255 RGB format)
+      * @param confidence Accuracy level of system (1 = 10% ... 9 = 90%)
+      * @param startFrame The first frame which the method starts running
+      *
+      * @return See Above
+      */
 
-    /**
-     * Detects whether the user has moved his/her finger
-     * from the camera. Ignores the first "n" frames
-     * due to excessive noise. Will return an integer
-     * value that has:
-     *
-     * 1 - Finger is accurately on camera!
-     * 2 - Finger not covering camera correctly!
-     * 3 - Finger has shifted on camera!
-     * 4 - Finger not on camera!
-     *
-     * 0 - No result
-     *
-     * @param rVal Average red value of a single image (0 - 255 RGB format)
-     * @param gVal Average green value of a single image (0 - 255 RGB format)
-     * @param bVal Average blue value of a single image (0 - 255 RGB format)
-     * @param confidence Accuracy level of system (1 = 10% ... 9 = 90%)
-     */
-
-    public int checkDataQuality(double rVal, double gVal, double bVal, int confidence) {
-        int output = 0;
-        if (rVal < 0 || gVal < 0 || bVal < 0 || confidence > DATA_SIZE - 1 || confidence < 0) {
-            throw new IllegalArgumentException();
-        }
-        if (mPeakCount < AVERAGE || mTroughCount < AVERAGE) {
-            double[] result = detectPeakTrough(rVal);
-            if (result[0] == PEAK) {
-                mPeakHold += result[2];
-                mPeakFrame += result[1];
-                mPeakCount++;
-            } else if(result[0] == TROUGH) {
-                mTroughHold += result[2];
-                mTroughFrame += result[1];
-                mTroughCount++;
-            }
-        } else if (!mAlreadyExecuted) {
-            mCalcDiff = ((mPeakHold / mPeakCount) - (mTroughHold / mTroughCount)) + ERROR_TOLERANCE;
-            mSignalWidth = (int) Math.abs((((mPeakFrame / mPeakCount)
-                                 - (mTroughFrame / mTroughCount))) + ERROR_TOLERANCE);
-            mCountHold = mFrameCount;
-            mAlreadyExecuted = true;
-        } else {
-            if (mFrameCount - mCountHold <= mSignalWidth) {
-                mElementHolder.add(rVal);
-            } else {
-                double difference = Math.abs(rVal - mElementHolder.remove());
-                if (difference < mCalcDiff && difference > MINIMUM_DIFFERENCE &&
-                        gVal < MAX_LIGHT_COVER && bVal < MAX_LIGHT_COVER) {
-                    mConfidence[0]++;
-                } else if (difference < mCalcDiff && difference > MINIMUM_DIFFERENCE &&
-                        (gVal < MAX_LIGHT_PARTIAL_COVER || bVal < MAX_LIGHT_PARTIAL_COVER)) {
-                    mConfidence[1]++;
-                } else if (difference > mCalcDiff) {
-                    mConfidence[2]++;
-                } else { // difference < 0.15 && gVal > 0.05 && bVal > 0.05
-                    mConfidence[3]++;
-                }
-                mElementHolder.add(rVal);
-                if (mFrameCount % DATA_SIZE == 0) {
-                   output = confidenceCheck(confidence);
-                    mConfidence = new int[MAX_ERROR_ALLOTMENT];
-                }
-            }
-        }
-        return output;
-    }
+     public int checkDataQuality(double rVal, double gVal, double bVal, int confidence, int startFrame) {
+         int output = 0;
+         if (rVal < 0 || gVal < 0 || bVal < 0 || confidence > DATA_SIZE - 1 || confidence < 0) {
+             throw new IllegalArgumentException();
+         }
+         if (mPeakCount < AVERAGE || mTroughCount < AVERAGE) {
+             double[] result = detectPeakTrough(rVal, startFrame);
+             if (result[0] == PEAK) {
+                 mPeakHold += result[2];
+                 mPeakFrame += result[1];
+                 mPeakCount++;
+             } else if(result[0] == TROUGH) {
+                 mTroughHold += result[2];
+                 mTroughFrame += result[1];
+                 mTroughCount++;
+             }
+         } else if (!mAlreadyExecuted) {
+             mCalcDiff = ((mPeakHold / mPeakCount) - (mTroughHold / mTroughCount)) + ERROR_TOLERANCE;
+             mSignalWidth = (int) Math.abs((((mPeakFrame / mPeakCount)
+                                  - (mTroughFrame / mTroughCount))) + ERROR_TOLERANCE);
+             mCountHold = mFrameCount;
+             mAlreadyExecuted = true;
+         } else {
+             if (mFrameCount - mCountHold <= mSignalWidth) {
+                 mElementHolder.add(rVal);
+             } else {
+                 double difference = Math.abs(rVal - mElementHolder.remove());
+                 if (difference < mCalcDiff && difference > MINIMUM_DIFFERENCE &&
+                         gVal < MAX_LIGHT_COVER && bVal < MAX_LIGHT_COVER) {
+                     mConfidence[0]++;
+                 } else if (difference < mCalcDiff && difference > MINIMUM_DIFFERENCE &&
+                         (gVal < MAX_LIGHT_PARTIAL_COVER || bVal < MAX_LIGHT_PARTIAL_COVER)) {
+                     mConfidence[1]++;
+                 } else if (difference > mCalcDiff) {
+                     mConfidence[2]++;
+                 } else { // difference < 0.15 && gVal > 0.05 && bVal > 0.05
+                     mConfidence[3]++;
+                 }
+                 mElementHolder.add(rVal);
+                 if (mFrameCount % DATA_SIZE == 0) {
+                     output = confidenceCheck(confidence);
+                     mConfidence = new int[MAX_ERROR_ALLOTMENT];
+                 }
+             }
+         }
+         return output;
+     }
 
     // Error reporting
     private int confidenceCheck(int confidence) {
@@ -297,13 +301,13 @@ public class AnemiaDetection {
     }
 
     /*
-     * Outputs a difference (magnitude) of the AC component of
-     * the input signal. The difference is calculated by subtracting
-     * the peak from the trough.
-     *
-     * @param input the array that contains
-     * @return the difference between the peak and trough
-     */
+        * Outputs a difference (magnitude) of the AC component of
+        * the input signal. The difference is calculated by subtracting
+        * the peak from the trough.
+        *
+        * @param input the array that contains
+        * @return the difference between the peak and trough
+        */
     public double findAcRange(double[] input) {
         double difference = 0.0;
         if (input[0] == PEAK && !mPrevPeakDetected) {
@@ -376,5 +380,4 @@ public class AnemiaDetection {
         return output;
     }
 }
-
 
