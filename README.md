@@ -1,7 +1,7 @@
 # AndroidAnemiaApplication
 
 Android Anemia Detection Class
-Version 1.35 (most current)
+Version 1.4 (most current)
 
 @Author William Li 
 
